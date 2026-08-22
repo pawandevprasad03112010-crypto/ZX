@@ -1,43 +1,44 @@
 import base64
 import os
+from flask import Flask
 from pymongo import MongoClient
 
-# Apni MongoDB Atlas connection string yahan daalein
-MONGO_URI = "mongodb+srv://pawandevprasad03112010_db_user:12345@firstmongodb.p45qsrf.mongodb.net/?retryWrites=true&w=majority&appName=FIRSTMONGODB"
+# Flask App शुरू करें
+app = Flask(__name__)
 
+# MongoDB Connection
+MONGO_URI = "mongodb+srv://pawandevprasad03112010_db_user:12345@firstmongodb.p4sqrf.mongodb.net/?retryWrites=true&w=majority"
 client = MongoClient(MONGO_URI)
 
-# Aapka database aur collection name 'xxx' hai
-db = client["xxx"]
-collection = db["xxx"]
+db = client["your_db_name"]  # 'your_db_name' को अपने सही DB नाम से बदलें
+collection = db["your_collection_name"]  # 'your_collection_name' बदलें
 
-# Ek naya folder banega jisme saari photos save hongi
 os.makedirs("saved_video_frames", exist_ok=True)
 
-# Database se saare documents nikalna
-documents = collection.find()
 
-count = 0
-for doc in documents:
-  image_data = doc.get("image_data")
-  if image_data:
-    try:
-      # Base64 header alag karke binary data banana
-      header, encoded = image_data.split(",", 1)
-      binary_data = base64.b64decode(encoded)
+@app.route("/")
+def run_script():
+    documents = collection.find()
+    count = 0
+    for doc in documents:
+        image_data = doc.get("image_data")
+        if image_data:
+            try:
+                header, encoded = image_data.split(",", 1)
+                binary_data = base64.b64decode(encoded)
 
-      # Har frame ko JPG image ke roop mein save karna
-      filename = f"saved_video_frames/frame_{count}.jpg"
-      with open(filename, "wb") as f:
-        f.write(binary_data)
+                filename = f"saved_video_frames/frame_{count}.jpg"
+                with open(filename, "wb") as f:
+                    f.write(binary_data)
+                count += 1
+            except Exception as e:
+                print(f"Error: {e}")
 
-      print(f"Saved: {filename}")
-      count += 1
-    except Exception as e:
-      print(f"Error decoding frame: {e}")
+    return f"Done! Saved {count} frames successfully."
 
-print(
-    f"\nTotal {count} frames successfully 'saved_video_frames' folder mein"
-    " download ho gaye hain!"
-)
 
+# Render Port हैंडलिंग
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
+  
