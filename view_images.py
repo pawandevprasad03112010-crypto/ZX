@@ -7,11 +7,11 @@ from pymongo import MongoClient
 app = Flask(__name__)
 
 # MongoDB Connection
-MONGO_URI = "mongodb+srv://pawandevprasad03112010_db_user:12345@firstmongodb.p4sqrf.mongodb.net/?retryWrites=true&w=majority"
+MONGO_URI = "mongodb+srv://pawandevprasad03112010_db_user:12345@firstmongodb.p45qsrf.mongodb.net/?appName=FIRSTMONGODB"
 client = MongoClient(MONGO_URI)
 
-db = client["your_db_name"]  # 'your_db_name' को अपने सही DB नाम से बदलें
-collection = db["your_collection_name"]  # 'your_collection_name' बदलें
+db = client["xxx"]  # 'your_db_name' को अपने सही DB नाम से बदलें
+collection = db["xxx"]  # 'your_collection_name' बदलें
 
 os.makedirs("saved_video_frames", exist_ok=True)
 
