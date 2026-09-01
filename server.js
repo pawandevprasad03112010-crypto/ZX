@@ -2,49 +2,51 @@ const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
 const cloudinary = require('cloudinary').v2;
-const path = require('path');
-require('dotenv').config();
 
 const app = express();
+
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use(express.static('public'));
 
-// Configure Cloudinary
 cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME || 'uq8eywxb',
+  api_key: process.env.CLOUDINARY_API_KEY || '11866433395381',
+  api_secret: process.env.CLOUDINARY_API_SECRET || 'JUVeYTckPyu6LknKqYQ6PEuNoM0'
 });
 
-// Configure Multer (Memory Storage)
 const storage = multer.memoryStorage();
-const upload = multer({ storage: storage });
+const upload = multer({ 
+  storage: storage,
+  limits: { fileSize: 20 * 1024 * 1024 }
+});
 
-// Single Image Upload Endpoint
-app.post('/api/upload', upload.single('image'), async (req, res) => {
+app.post('/api/upload-multiple', upload.array('images'), async (req, res) => {
   try {
-    if (!req.file) {
-      return res.status(400).json({ success: false, error: 'No image file provided' });
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ success: false, error: 'No image files provided' });
     }
 
-    // Convert Buffer to Data URI
-    const fileBase64 = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
-
-    // Upload directly to Cloudinary via SDK
-    const result = await cloudinary.uploader.upload(fileBase64, {
-      folder: 'auto_cropped_watermarked'
+    const uploadPromises = req.files.map((file) => {
+      return new Promise((resolve, reject) => {
+        const fileBase64 = `data:${file.mimetype};base64,${file.buffer.toString('base64')}`;
+        cloudinary.uploader.upload(fileBase64, { folder: 'processed_images' }, (error, result) => {
+          if (error) reject(error);
+          else resolve(result.secure_url);
+        });
+      });
     });
 
-    res.json({ success: true, url: result.secure_url });
+    const urls = await Promise.all(uploadPromises);
+    res.json({ success: true, urls: urls });
   } catch (error) {
-    console.error('Cloudinary Upload Error:', error);
+    console.error('Batch Upload Error:', error);
     res.status(500).json({ success: false, error: error.message || 'Server Upload Failed' });
   }
 });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`Server is running on http://localhost:${PORT}`);
+  console.log(`Server running on port ${PORT}`);
 });
-
