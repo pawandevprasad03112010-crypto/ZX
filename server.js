@@ -10,11 +10,11 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use(express.static('public'));
 
-// डायरेक्ट क्रेडेंशियल्स का उपयोग
+// डायरेक्ट हार्डकोडेड क्रेडेंशियल्स
 cloudinary.config({
-  cloud_name: 'uq8eywxb',
-  api_key: '11866433395381',
-  api_secret: 'JUVeYTckPyu6LknKqYQ6PEuNoM0' // <--- बस यहाँ पेस्ट करें
+  cloud_name: 'pfmjg7ip',
+  api_key: '368463435529631',
+  api_secret: '6u7lnfIRo4ikkXSR_GM2ziUtStM'
 });
 
 const storage = multer.memoryStorage();
