@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
@@ -10,11 +11,10 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use(express.static('public'));
 
-// डायरेक्ट हार्डकोडेड क्रेडेंशियल्स
 cloudinary.config({
-  cloud_name: 'pfmjg7ip',
-  api_key: '368463435529631',
-  api_secret: '6u7lnfIRo4ikkXSR_GM2ziUtStM'
+  cloud_name: process.env.CLOUD_NAME,
+  api_key: process.env.API_KEY,
+  api_secret: process.env.API_SECRET
 });
 
 const storage = multer.memoryStorage();
@@ -29,13 +29,17 @@ app.post('/api/upload-multiple', upload.array('images'), async (req, res) => {
       return res.status(400).json({ success: false, error: 'No image files provided' });
     }
 
+    // क्रम (Serial Wise Order) बनाए रखने के लिए मैप और स्ट्रीम का उपयोग
     const uploadPromises = req.files.map((file) => {
       return new Promise((resolve, reject) => {
-        const fileBase64 = `data:${file.mimetype};base64,${file.buffer.toString('base64')}`;
-        cloudinary.uploader.upload(fileBase64, { folder: 'processed_images' }, (error, result) => {
-          if (error) reject(error);
-          else resolve(result.secure_url);
-        });
+        const stream = cloudinary.uploader.upload_stream(
+          { folder: 'processed_images' },
+          (error, result) => {
+            if (error) reject(error);
+            else resolve(result.secure_url);
+          }
+        );
+        stream.end(file.buffer);
       });
     });
 
