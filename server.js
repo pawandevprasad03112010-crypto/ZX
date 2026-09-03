@@ -6,8 +6,10 @@ const cloudinary = require('cloudinary').v2;
 const app = express();
 
 app.use(cors());
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ limit: '50mb', extended: true }));
+
+// बड़ी फाइलों के लिए लिमिट बढ़ा दी गई है
+app.use(express.json({ limit: '100mb' }));
+app.use(express.urlencoded({ limit: '100mb', extended: true }));
 app.use(express.static('public'));
 
 // डायरेक्ट हार्डकोडेड क्रेडेंशियल्स
@@ -20,7 +22,7 @@ cloudinary.config({
 const storage = multer.memoryStorage();
 const upload = multer({ 
   storage: storage,
-  limits: { fileSize: 20 * 1024 * 1024 }
+  limits: { fileSize: 50 * 1024 * 1024 } // 50MB per file limit
 });
 
 app.post('/api/upload-multiple', upload.array('images'), async (req, res) => {
@@ -29,21 +31,22 @@ app.post('/api/upload-multiple', upload.array('images'), async (req, res) => {
       return res.status(400).json({ success: false, error: 'No image files provided' });
     }
 
-    // क्रम (Serial Order) बनाए रखने के लिए मैप और स्ट्रीम का उपयोग
-    const uploadPromises = req.files.map((file) => {
-      return new Promise((resolve, reject) => {
+    // सीरियल ऑर्डर बनाए रखने के लिए Sequentially अपलोड करना (Render timeout से बचने के लिए)
+    const urls = [];
+    for (const file of req.files) {
+      const result = await new Promise((resolve, reject) => {
         const stream = cloudinary.uploader.upload_stream(
-          { folder: 'processed_images' },
+          { folder: 'processed_images', resource_type: 'image' },
           (error, result) => {
             if (error) reject(error);
-            else resolve(result.secure_url);
+            else resolve(result);
           }
         );
         stream.end(file.buffer);
       });
-    });
+      urls.push(result.secure_url);
+    }
 
-    const urls = await Promise.all(uploadPromises);
     res.json({ success: true, urls: urls });
   } catch (error) {
     console.error('Batch Upload Error:', error);
@@ -55,3 +58,4 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
+  
