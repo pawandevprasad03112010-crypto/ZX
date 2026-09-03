@@ -50,6 +50,8 @@
     .btn:hover { background-color: #0052cc; }
     .btn-green { background-color: #10b981; }
     .btn-green:hover { background-color: #059669; }
+    .btn-purple { background-color: #8b5cf6; margin-top: 15px; }
+    .btn-purple:hover { background-color: #7c3aed; }
 
     #gallery {
       display: flex;
@@ -135,7 +137,29 @@
       display: flex;
       flex-direction: column;
       align-items: center;
+      position: relative;
     }
+    .remove-btn {
+      position: absolute;
+      top: -6px;
+      right: -6px;
+      background: #ef4444;
+      color: white;
+      border: 2px solid #fff;
+      border-radius: 50%;
+      width: 24px;
+      height: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: bold;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+      z-index: 10;
+    }
+    .remove-btn:hover { background: #dc2626; }
+    
     .processed-img {
       width: 100%;
       height: 110px;
@@ -227,6 +251,7 @@
   <div id="urlResults">
     <label style="font-weight: bold; margin-bottom: 10px; display: block;">Generated Cloudinary URLs:</label>
     <div id="urlList"></div>
+    <button class="btn btn-purple" id="copyAllBtn">Copy All URLs</button>
   </div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.js"></script>
@@ -245,16 +270,19 @@
     const statusText = document.getElementById('statusText');
     const urlResults = document.getElementById('urlResults');
     const urlList = document.getElementById('urlList');
+    const copyAllBtn = document.getElementById('copyAllBtn');
 
     let cropperInstances = [];
     let wmPositions = [];
     let processedBlobs = [];
+    let uploadedUrls = [];
 
     imageInput.addEventListener('change', (e) => {
       cropperInstances.forEach(inst => inst.destroy());
       cropperInstances = [];
       wmPositions = [];
       processedBlobs = [];
+      uploadedUrls = [];
       gallery.innerHTML = '';
       processedSection.style.display = 'none';
       urlResults.style.display = 'none';
@@ -389,6 +417,8 @@
     function getFinalImageBlob(index) {
       return new Promise((resolve) => {
         const cropper = cropperInstances[index];
+        if (!cropper) return resolve(null);
+        
         const srcCanvas = cropper.getCroppedCanvas();
         if (!srcCanvas) return resolve(null);
 
@@ -421,11 +451,14 @@
 
       processedGrid.innerHTML = '';
       processedBlobs = [];
+      uploadedUrls = [];
       urlResults.style.display = 'none';
       urlList.innerHTML = '';
       statusText.innerText = '';
 
       for (let index = 0; index < cropperInstances.length; index++) {
+        if (!cropperInstances[index]) continue;
+        
         const blob = await getFinalImageBlob(index);
         if (!blob) continue;
 
@@ -433,21 +466,42 @@
 
         const card = document.createElement('div');
         card.className = 'processed-card';
-        card.innerHTML = `<img class="processed-img" src="${URL.createObjectURL(blob)}">`;
+        card.innerHTML = `
+          <button class="remove-btn" title="Remove Photo">✕</button>
+          <img class="processed-img" src="${URL.createObjectURL(blob)}">
+        `;
+
+        // Cross (Close) Icon Click Listener
+        const removeBtn = card.querySelector('.remove-btn');
+        removeBtn.addEventListener('click', () => {
+          const blobIndex = processedBlobs.indexOf(blob);
+          if (blobIndex > -1) {
+            processedBlobs.splice(blobIndex, 1);
+          }
+          card.remove();
+
+          if (processedBlobs.length === 0) {
+            processedSection.style.display = 'none';
+          }
+        });
+
         processedGrid.appendChild(card);
       }
       
-      processedSection.style.display = 'block';
-      processedSection.scrollIntoView({ behavior: 'smooth' });
+      if (processedBlobs.length > 0) {
+        processedSection.style.display = 'block';
+        processedSection.scrollIntoView({ behavior: 'smooth' });
+      }
     });
 
     getAllUrlsBtn.addEventListener('click', async () => {
-      if (processedBlobs.length === 0) return;
+      if (processedBlobs.length === 0) return alert('No photos to upload!');
 
       getAllUrlsBtn.disabled = true;
       getAllUrlsBtn.innerText = 'Uploading to Cloudinary...';
       statusText.innerText = 'Please wait, uploading images...';
       urlList.innerHTML = '';
+      uploadedUrls = [];
 
       const formData = new FormData();
       processedBlobs.forEach((blob, i) => {
@@ -463,7 +517,8 @@
         const data = await res.json();
 
         if (data.success && data.urls) {
-          data.urls.forEach((url) => {
+          uploadedUrls = data.urls;
+          uploadedUrls.forEach((url) => {
             addUrlRow(url);
           });
           urlResults.style.display = 'block';
@@ -507,6 +562,25 @@
 
       urlList.appendChild(row);
     }
+
+    // Copy All URLs logic
+    copyAllBtn.addEventListener('click', () => {
+      if (uploadedUrls.length === 0) return;
+
+      // Format: "URL1", "URL2", "URL3"
+      const formattedUrls = uploadedUrls.map(url => `"${url}"`).join(', ');
+
+      navigator.clipboard.writeText(formattedUrls).then(() => {
+        copyAllBtn.innerText = 'All URLs Copied!';
+        copyAllBtn.style.background = '#10b981';
+        setTimeout(() => {
+          copyAllBtn.innerText = 'Copy All URLs';
+          copyAllBtn.style.background = '#8b5cf6';
+        }, 2000);
+      }).catch(err => {
+        console.error('Copy failed: ', err);
+      });
+    });
   </script>
 </body>
 </html>
