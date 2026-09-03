@@ -289,7 +289,6 @@
     let processedBlobs = [];
     let uploadedUrls = [];
 
-    // फ़ाइल रीड करने के लिए प्रॉमिस (ताकि ऑर्डर हमेशा सही रहे)
     const readFileAsDataURL = (file) => {
       return new Promise((resolve) => {
         const reader = new FileReader();
@@ -298,7 +297,7 @@
       });
     };
 
-    // 1. क्रमबद्ध फ़ाइल चयन (Sequential File Selection)
+    // 1. Files ko strictly Name/Index ke hisab se sort karke sequential load karna
     imageInput.addEventListener('change', async (e) => {
       cropperInstances.forEach(inst => inst && inst.destroy());
       cropperInstances = [];
@@ -312,8 +311,11 @@
       urlList.innerHTML = '';
       statusText.innerText = '';
 
-      const files = Array.from(e.target.files);
+      let files = Array.from(e.target.files);
       if (files.length === 0) return;
+
+      // File sorting to avoid mobile gallery re-ordering
+      files.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
 
       for (let i = 0; i < files.length; i++) {
         const imgSrc = await readFileAsDataURL(files[i]);
@@ -465,7 +467,7 @@
       });
     }
 
-    // 2. क्रमबद्ध इमेज प्रोसेसिंग (Serial Image Processing)
+    // 2. Photos ko bilkul Serial Order mein Process aur Grid mein Render karna
     generateBtn.addEventListener('click', async () => {
       if (cropperInstances.length === 0) return alert('Please select photos first!');
 
@@ -487,6 +489,7 @@
 
         const card = document.createElement('div');
         card.className = 'processed-card';
+        card.setAttribute('data-blob-index', currentSerial - 1);
         card.innerHTML = `
           <div class="card-number">#${currentSerial}</div>
           <button class="remove-btn" title="Remove Photo">✕</button>
@@ -524,21 +527,20 @@
       });
     }
 
-    // 3. क्रमबद्ध अपलोड और URL प्रदर्शन (Serial Upload & URL Display)
+    // 3. Serial-wise Cloudinary Upload & Output Order Lock
     getAllUrlsBtn.addEventListener('click', async () => {
       if (processedBlobs.length === 0) return alert('No photos to upload!');
 
       getAllUrlsBtn.disabled = true;
       getAllUrlsBtn.innerText = 'Uploading to Cloudinary...';
-      statusText.innerText = 'Please wait, uploading images in sequence...';
+      statusText.innerText = 'Please wait, uploading images sequentially...';
       urlList.innerHTML = '';
       uploadedUrls = [];
 
       const formData = new FormData();
-      // फ़ाइलों का नाम 01, 02 के रूप में दिया गया है ताकि बैकएंड में इनका क्रम स्थिर रहे
       processedBlobs.forEach((blob, i) => {
-        const paddedIndex = String(i + 1).padStart(3, '0');
-        formData.append('images', blob, `photo_${paddedIndex}.png`);
+        const serialName = `photo_${String(i + 1).padStart(3, '0')}.png`;
+        formData.append('images', blob, serialName);
       });
 
       try {
@@ -551,6 +553,7 @@
 
         if (data.success && data.urls) {
           uploadedUrls = data.urls;
+          urlList.innerHTML = '';
           uploadedUrls.forEach((url, index) => {
             addUrlRow(url, index);
           });
