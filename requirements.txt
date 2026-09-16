@@ -1,7 +1,5 @@
 fastapi
 uvicorn
 gTTS
-moviepy
-pydantic
-imageio-ffmpeg
-pillow
+opencv-python-headless
+numpy
