@@ -1,5 +1,4 @@
-fastapi
-uvicorn
-gTTS
-opencv-python-headless
-numpy
+Flask==3.0.2
+boto3==1.34.0
+gunicorn==21.2.0
+
