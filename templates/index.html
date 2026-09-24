@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Property Search - EstateX</title>
+    <style>
+        body { font-family: Arial, sans-serif; background-color: #f4f6f9; margin: 0; padding: 20px; }
+        .container { max-width: 900px; margin: auto; }
+        
+        /* टॉप बार जिसमें काउंट और सर्च बॉक्स होगा */
+        .top-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .count-box { font-size: 18px; font-weight: bold; color: #333; }
+        
+        .search-container { position: relative; display: flex; gap: 10px; width: 60%; }
+        .search-container input { width: 100%; padding: 10px; font-size: 16px; border: 1px solid #ccc; border-radius: 4px; }
+        .search-container button { padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; }
+        .search-container button:hover { background: #0056b3; }
+
+        /* सजेशन ड्रॉपडाउन */
+        .suggestions { position: absolute; top: 100%; left: 0; right: 0; background: white; border: 1px solid #ccc; border-top: none; max-height: 150px; overflow-y: auto; z-index: 1000; display: none; }
+        .suggestion-item { padding: 10px; cursor: pointer; }
+        .suggestion-item:hover { background: #f0f0f0; }
+
+        /* लिस्टिंग्स बॉक्स लेआउट */
+        .listing-card { background: white; padding: 20px; margin-bottom: 15px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        .listing-card h3 { margin-top: 0; color: #007bff; }
+        
+        /* होरिजेंटल फोटो स्क्रॉल */
+        .scroll-images { display: flex; overflow-x: auto; gap: 10px; padding: 10px 0; scrollbar-width: thin; }
+        .scroll-images img { width: 200px; height: 130px; object-fit: cover; border-radius: 6px; flex-shrink: 0; border: 1px solid #ddd; }
+        
+        .no-results { text-align: center; color: #777; font-size: 18px; margin-top: 30px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="top-bar">
+        <!-- लेफ्ट साइड में कुल लिस्टिंग काउंट -->
+        <div class="count-box" id="listingCount">कुल लिस्टिंग्स: 0</div>
+        
+        <!-- सर्च बॉक्स और बटन -->
+        <div class="search-container">
+            <input type="text" id="searchInput" placeholder="लोकेशन सर्च करें (जैसे- Behala, Kolkata)..." autocomplete="off">
+            <button id="searchBtn">सर्च</button>
+            <div class="suggestions" id="suggestionsBox"></div>
+        </div>
+    </div>
+
+    <!-- रिजल्ट्स दिखाने का एरिया -->
+    <div id="resultsContainer">
+        <div class="no-results">कृपया कोई लोकेशन सर्च करें या चुनें।</div>
+    </div>
+</div>
+
+<script>
+    const searchInput = document.getElementById('searchInput');
+    const suggestionsBox = document.getElementById('suggestionsBox');
+    const searchBtn = document.getElementById('searchBtn');
+    const resultsContainer = document.getElementById('resultsContainer');
+    const listingCount = document.getElementById('listingCount');
+
+    let allLocations = [];
+
+    // ऐप लोड होते ही लोकेशंस फेच कर लें ताकि टाइप करते समय सजेशन आ सकें
+    fetch('/api/locations')
+        .then(res => res.json())
+        .then(data => { allLocations = data; });
+
+    // लाइव टाइपिंग पर सजेशन दिखाना
+    searchInput.addEventListener('input', function() {
+        const query = this.value.toLowerCase();
+        suggestionsBox.innerHTML = '';
+        if (!query) {
+            suggestionsBox.style.display = 'none';
+            return;
+        }
+
+        const filtered = allLocations.filter(loc => loc.toLowerCase().includes(query));
+        if (filtered.length > 0) {
+            suggestionsBox.style.display = 'block';
+            filtered.forEach(loc => {
+                const div = document.createElement('div');
+                div.classList.add('suggestion-item');
+                div.textContent = loc;
+                div.onclick = function() {
+                    searchInput.value = loc;
+                    suggestionsBox.style.display = 'none';
+                    fetchProperties(loc);
+                };
+                suggestionsBox.appendChild(div);
+            });
+        } else {
+            suggestionsBox.style.display = 'none';
+        }
+    });
+
+    // सर्च बटन पर क्लिक करने पर
+    searchBtn.onclick = function() {
+        suggestionsBox.style.display = 'none';
+        fetchProperties(searchInput.value);
+    };
+
+    // प्रॉपर्टीज फेच करने और स्क्रीन पर दिखाने का फंक्शन
+    function fetchProperties(query) {
+        fetch(`/api/search?q=${encodeURIComponent(query)}`)
+            .then(res => res.json())
+            .then(data => {
+                listingCount.textContent = `कुल लिस्टिंग्स: ${data.length}`;
+                resultsContainer.innerHTML = '';
+
+                if (data.length === 0) {
+                    resultsContainer.innerHTML = '<div class="no-results">इस लोकेशन पर कोई प्रॉपर्टी नहीं मिली।</div>';
+                    return;
+                }
+
+                data.forEach(item => {
+                    const loc = item.location || {};
+                    const media = item.media || {};
+                    const images = media.images || [];
+
+                    let imagesHtml = '';
+                    if (images.length > 0) {
+                        imagesHtml = '<div class="scroll-images">';
+                        images.forEach(imgUrl => {
+                            imagesHtml += `<img src="${imgUrl}" alt="Property Image">`;
+                        });
+                        imagesHtml += '</div>';
+                    } else {
+                        imagesHtml = '<p>कोई फोटो उपलब्ध नहीं है।</p>';
+                    }
+
+                    const card = document.createElement('div');
+                    card.classList.add('listing-card');
+                    card.innerHTML = `
+                        <h3>प्रॉपर्टी आईडी: ${item.property_id || 'N/A'}</h3>
+                        <p><strong>शहर/लोकेशन:</strong> ${loc.sub_locality || ''}, ${loc.city || ''} (${loc.state || ''})</p>
+                        <p><strong>फुल एड्रेस:</strong> ${loc.full_address || 'उपलब्ध नहीं'}</p>
+                        <p><strong>पिनकोड:</strong> ${loc.pincode || 'N/A'}</p>
+                        <p><strong>इमेजेस (साइड स्क्रॉल करें):</strong></p>
+                        ${imagesHtml}
+                    `;
+                    resultsContainer.appendChild(card);
+                });
+            });
+    }
+</script>
+
+</body>
+</html>
