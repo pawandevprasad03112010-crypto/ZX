@@ -5,8 +5,8 @@ from flask import Flask, jsonify, render_template, request
 app = Flask(__name__)
 
 # --- AWS कॉन्फ़िगरेशन ---
-AWS_ACCESS_KEY_ID = "AKIA32VVAONMU6L6OLU3"
-AWS_SECRET_ACCESS_KEY = "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"
+AWS_ACCESS_KEY_ID = "AKIA32VVAONMTGEJMYPW"
+AWS_SECRET_ACCESS_KEY = "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"
 REGION = "ap-south-1"
 TABLE_NAME = "BUY_PROPERTY"
 
