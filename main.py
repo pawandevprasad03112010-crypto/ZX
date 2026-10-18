@@ -22,16 +22,21 @@ dynamodb = boto3.resource(
 )
 table = dynamodb.Table(TABLE_NAME)
 
-# Helper function: Python float/int ko DynamoDB Decimal mein convert karne ke liye
-def convert_floats_to_decimals(obj):
-    if isinstance(obj, list):
-        return [convert_floats_to_decimals(i) for i in obj]
-    elif isinstance(obj, dict):
-        return {k: convert_floats_to_decimals(v) for k, v in obj.items()}
+def sanitize_and_convert_decimals(obj):
+    """
+    Safely converts float/int numbers in nested Dicts/Lists to Decimal for DynamoDB.
+    Handles nested lists, dicts, booleans, strings, and None cleanly.
+    """
+    if isinstance(obj, bool):
+        return obj
     elif isinstance(obj, float):
         return Decimal(str(obj))
     elif isinstance(obj, int):
         return Decimal(str(obj))
+    elif isinstance(obj, dict):
+        return {str(k): sanitize_and_convert_decimals(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [sanitize_and_convert_decimals(elem) for elem in obj]
     return obj
 
 HTML_TEMPLATE = """
@@ -138,15 +143,17 @@ def insert_property():
         req_data = request.json
         raw_json_str = req_data.get("raw_json", "")
         
-        item_dict = json.loads(raw_json_str)
+        # Parse JSON
+        item_dict = json.loads(raw_json_str, parse_float=Decimal)
         
-        # Agar JSON mein property_id na ho toh automatic unique UUID bana do
+        # Automatic UUID if property_id is missing or empty
         if PRIMARY_KEY not in item_dict or not item_dict[PRIMARY_KEY]:
             item_dict[PRIMARY_KEY] = str(uuid.uuid4())
             
         generated_id = item_dict[PRIMARY_KEY]
         
-        item_to_save = convert_floats_to_decimals(item_dict)
+        # Sanitize and convert for DynamoDB
+        item_to_save = sanitize_and_convert_decimals(item_dict)
         table.put_item(Item=item_to_save)
         
         return jsonify({"success": True, "property_id": generated_id})
