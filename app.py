@@ -1,13 +1,16 @@
 import os
 import boto3
-from fastapi import FastAPI, Request, Query
+from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 app = FastAPI(title="Only Broker Real Estate Portal")
-templates = Jinja2Templates(directory="templates")
 
-# AWS and DynamoDB Credentials
+# सही पाथ के साथ टेम्पलेट्स सेट करना
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
+
+# AWS और DynamoDB क्रेडेंशियल्स
 AWS_ACCESS_KEY_ID = "AKIA32VVAONMQV5QKNED"
 AWS_SECRET_ACCESS_KEY = "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"
 REGION = "ap-south-1"
@@ -23,7 +26,6 @@ def get_dynamodb_resource():
     )
 
 def search_listings_on_demand(query_str: str = ""):
-    """ जब यूजर सर्च करेगा, केवल तभी डेटाबेस को स्कैन और फिल्टर किया जाएगा। """
     dynamodb = get_dynamodb_resource()
     matched_listings = []
     all_locations = set()
@@ -34,7 +36,6 @@ def search_listings_on_demand(query_str: str = ""):
     for table_name in TABLE_NAMES:
         try:
             table = dynamodb.Table(table_name)
-            # यदि यूजर ने कुछ सर्च किया है, तो हम टारगेटेड स्कैन या फिल्टर लगा सकते हैं
             response = table.scan()
             items = response.get('Items', [])
             
@@ -49,7 +50,7 @@ def search_listings_on_demand(query_str: str = ""):
                     item['unified_id'] = f"{table_name}_{prop_id}"
                     item['source_table'] = table_name
 
-                    # Location standardization
+                    # लोकेशन स्टैंडर्डाइज़ेशन
                     loc = item.get('location', {})
                     city, locality = "", ""
                     if isinstance(loc, dict):
@@ -66,7 +67,7 @@ def search_listings_on_demand(query_str: str = ""):
                     item['search_location'] = search_loc
                     all_locations.add(search_loc)
 
-                    # Images standardization
+                    # इमेजेस स्टैंडर्डाइज़ेशन
                     images = []
                     media = item.get('media', {})
                     if isinstance(media, dict):
@@ -79,7 +80,7 @@ def search_listings_on_demand(query_str: str = ""):
                     
                     item['unified_images'] = images
 
-                    # Title & Price standardization
+                    # टाइटल और प्राइस स्टैंडर्डाइज़ेशन
                     listing_sec = item.get('listing', {})
                     entity_sec = item.get('entity', {})
                     pricing_sec = item.get('pricing', {})
@@ -97,7 +98,6 @@ def search_listings_on_demand(query_str: str = ""):
                     else:
                         item['unified_area'] = str(item.get('area') or 'Standard Area')
 
-                    # इलास्टिक सर्च मैचिंग लॉजिक (सर्च के समय फिल्टर)
                     if not query_lower or (query_lower in search_loc.lower() or query_lower in title.lower()):
                         matched_listings.append(item)
 
@@ -112,11 +112,10 @@ def search_listings_on_demand(query_str: str = ""):
 @app.get("/", response_class=HTMLResponse)
 @app.head("/", response_class=HTMLResponse)
 async def home(request: Request, q: str = ""):
-    # जब यूजर सर्च करेगा (या पेज खोलेगा), तभी यह ऑन-डिमांड फेच और सर्च करेगा
     listings, locations, total_count = search_listings_on_demand(q)
 
+    # सुरक्षित और सही TemplateResponse सिंटैक्स
     return templates.TemplateResponse(
-        request, 
         "index.html", 
         {
             "request": request,
@@ -129,8 +128,8 @@ async def home(request: Request, q: str = ""):
     )
 
 @app.get("/property/{unified_id}", response_class=HTMLResponse)
+@app.head("/property/{unified_id}", response_class=HTMLResponse)
 async def property_detail(request: Request, unified_id: str):
-    # डिटेल पेज के लिए भी ऑन-डिमांड सिंगल सर्च या फुल लिस्ट फेच
     listings, _, _ = search_listings_on_demand("")
     property_item = next((item for item in listings if item['unified_id'] == unified_id), None)
     
@@ -138,7 +137,6 @@ async def property_detail(request: Request, unified_id: str):
         return HTMLResponse("<h3>Property not found</h3>", status_code=404)
 
     return templates.TemplateResponse(
-        request, 
         "detail.html", 
         {
             "request": request,
