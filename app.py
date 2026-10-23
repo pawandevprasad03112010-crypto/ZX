@@ -1,6 +1,7 @@
 import os
 import boto3
-from fastapi import FastAPI, Request
+from decimal import Decimal
+from fastapi import FastAPI, Request, Query
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
@@ -16,9 +17,6 @@ REGION = "ap-south-1"
 
 TABLE_NAMES = ["BUY_PROPERTY", "LARGE_PROPERTY_LISTING"]
 
-# ऑन-डिमांड डेटा स्टोर करने के लिए कैश वेरिएबल
-_cached_listings = None
-
 def get_dynamodb_resource():
     return boto3.resource(
         'dynamodb',
@@ -27,128 +25,157 @@ def get_dynamodb_resource():
         region_name=REGION
     )
 
-def load_listings_on_demand():
-    global _cached_listings
-    if _cached_listings is not None:
-        return _cached_listings
+def decimal_to_native(obj):
+    """DynamoDB के Decimal डेटा को सामान्य पाइथन डेटा में बदलता है।"""
+    if isinstance(obj, list):
+        return [decimal_to_native(i) for i in obj]
+    elif isinstance(obj, dict):
+        return {str(k): decimal_to_native(v) for k, v in obj.items()}
+    elif isinstance(obj, Decimal):
+        if obj % 1 == 0:
+            return int(obj)
+        else:
+            return float(obj)
+    return obj
 
-    dynamodb = get_dynamodb_resource()
-    all_listings = []
+def standardize_item(table_name, raw_item):
+    """प्रॉपर्टी डेटा को सुरक्षित रूप से मानक (standardize) करता है।"""
+    item = decimal_to_native(raw_item)
+    prop_id = str(item.get('property_id') or item.get('id') or item.get('_id') or 'unknown')
+    item['unified_id'] = f"{table_name}_{prop_id}"
+    item['source_table'] = table_name
 
-    for table_name in TABLE_NAMES:
-        try:
-            table = dynamodb.Table(table_name)
-            response = table.scan()
-            items = response.get('Items', [])
-            
-            while 'LastEvaluatedKey' in response:
-                response = table.scan(ExclusiveStartKey=response['LastEvaluatedKey'])
-                items.extend(response.get('Items', []))
+    # लोकेशन
+    loc = item.get('location', {})
+    city, locality = "", ""
+    if isinstance(loc, dict):
+        city = str(loc.get('city', ''))
+        locality = str(loc.get('locality', '') or loc.get('locality_name', '') or loc.get('society_name', ''))
+    else:
+        city = str(item.get('city', ''))
+        locality = str(item.get('locality', ''))
+    
+    search_loc = f"{locality}, {city}".strip(', ')
+    item['search_location'] = search_loc if search_loc else "Unknown Location"
 
-            for item in items:
-                try:
-                    prop_id = str(item.get('property_id') or item.get('id') or item.get('_id') or 'unknown')
-                    item['unified_id'] = f"{table_name}_{prop_id}"
-                    item['source_table'] = table_name
+    # इमेजेस
+    images = []
+    media = item.get('media', {})
+    if isinstance(media, dict):
+        img_list = media.get('images', [])
+        if isinstance(img_list, list):
+            images = [str(img) for img in img_list if img and str(img).startswith('http')]
+    
+    if not images:
+        images = ["https://property-images-estatex-1.s3.ap-south-1.amazonaws.com/photo_1790848636898_001.png"]
+    item['unified_images'] = images
 
-                    # लोकेशन स्टैंडर्डाइज़ेशन
-                    loc = item.get('location', {})
-                    city, locality = "", ""
-                    if isinstance(loc, dict):
-                        city = str(loc.get('city', ''))
-                        locality = str(loc.get('locality', '') or loc.get('locality_name', '') or loc.get('society_name', ''))
-                    else:
-                        city = str(item.get('city', ''))
-                        locality = str(item.get('locality', ''))
-                    
-                    search_loc = f"{locality}, {city}".strip(', ')
-                    if not search_loc:
-                        search_loc = "Unknown Location"
-                    item['search_location'] = search_loc
+    # टाइटल और प्राइस
+    listing_sec = item.get('listing', {})
+    entity_sec = item.get('entity', {})
+    pricing_sec = item.get('pricing', {})
 
-                    # इमेजेस स्टैंडर्डाइज़ेशन
-                    images = []
-                    media = item.get('media', {})
-                    if isinstance(media, dict):
-                        img_list = media.get('images', [])
-                        if isinstance(img_list, list):
-                            images = [str(img) for img in img_list if img and str(img).startswith('http')]
-                    
-                    if not images:
-                        images = ["https://property-images-estatex-1.s3.ap-south-1.amazonaws.com/photo_1790848636898_001.png"]
-                    item['unified_images'] = images
+    title = str(listing_sec.get('title') or entity_sec.get('title') or item.get('title') or 'Residential Property')
+    item['unified_title'] = title
+    item['unified_price'] = str(pricing_sec.get('display_price') or pricing_sec.get('price_in_words') or item.get('price') or 'Contact for Price')
+    
+    prop_sec = item.get('property', {})
+    item['unified_bhk'] = str(prop_sec.get('bedrooms') or item.get('bedrooms') or '2')
+    
+    area_sec = prop_sec.get('area', {})
+    if isinstance(area_sec, dict):
+        item['unified_area'] = str(area_sec.get('display_area') or item.get('area') or 'Standard Area')
+    else:
+        item['unified_area'] = str(item.get('area') or 'Standard Area')
 
-                    # टाइटल और प्राइस
-                    listing_sec = item.get('listing', {})
-                    entity_sec = item.get('entity', {})
-                    pricing_sec = item.get('pricing', {})
-
-                    title = str(listing_sec.get('title') or entity_sec.get('title') or item.get('title') or 'Residential Property')
-                    item['unified_title'] = title
-                    item['unified_price'] = str(pricing_sec.get('display_price') or pricing_sec.get('price_in_words') or item.get('price') or 'Contact for Price')
-                    
-                    prop_sec = item.get('property', {})
-                    item['unified_bhk'] = str(prop_sec.get('bedrooms') or item.get('bedrooms') or '2')
-                    
-                    area_sec = prop_sec.get('area', {})
-                    if isinstance(area_sec, dict):
-                        item['unified_area'] = str(area_sec.get('display_area') or item.get('area') or 'Standard Area')
-                    else:
-                        item['unified_area'] = str(item.get('area') or 'Standard Area')
-
-                    all_listings.append(item)
-                except Exception:
-                    continue
-        except Exception as e:
-            print(f"Error scanning table {table_name}: {e}")
-
-    _cached_listings = all_listings
-    return _cached_listings
+    return item
 
 @app.get("/", response_class=HTMLResponse)
 @app.head("/", response_class=HTMLResponse)
 async def home(request: Request, q: str = ""):
-    listings = load_listings_on_demand()
-    total_count = len(listings)
+    try:
+        listings = []
+        all_locations = set()
+        total_db_count = 0
+        query_lower = q.strip().lower()
 
-    locations = sorted(list(set(item['search_location'] for item in listings if item['search_location'])))
+        # यदि यूजर ने सर्च किया है, केवल तभी डेटाबेस स्कैन होगा
+        if query_lower:
+            dynamodb = get_dynamodb_resource()
+            for table_name in TABLE_NAMES:
+                try:
+                    table = dynamodb.Table(table_name)
+                    response = table.scan()
+                    items = response.get('Items', [])
+                    
+                    while 'LastEvaluatedKey' in response:
+                        response = table.scan(ExclusiveStartKey=response['LastEvaluatedKey'])
+                        items.extend(response.get('Items', []))
 
-    filtered_listings = listings
-    query_lower = q.strip().lower()
+                    for raw_item in items:
+                        total_db_count += 1
+                        try:
+                            item = standardize_item(table_name, raw_item)
+                            all_locations.add(item['search_location'])
 
-    if query_lower:
-        filtered_listings = [
-            item for item in listings 
-            if query_lower in item['search_location'].lower() 
-            or query_lower in item['unified_title'].lower()
-        ]
+                            if query_lower in item['search_location'].lower() or query_lower in item['unified_title'].lower():
+                                listings.append(item)
+                        except Exception:
+                            continue
+                except Exception as e:
+                    print(f"Error scanning table {table_name}: {e}")
 
-    return templates.TemplateResponse(
-        "index.html", 
-        {
-            "request": request,
-            "listings": filtered_listings,
-            "total_count": total_count,
-            "filtered_count": len(filtered_listings),
-            "locations": locations,
-            "query": q or ""
-        }
-    )
+        return templates.TemplateResponse(
+            "index.html", 
+            {
+                "request": request,
+                "listings": listings,
+                "total_count": total_db_count if query_lower else 0,
+                "filtered_count": len(listings),
+                "locations": sorted(list(all_locations)),
+                "query": q or ""
+            }
+        )
+    except Exception as e:
+        return HTMLResponse(f"<h3>Internal Server Error: {str(e)}</h3>", status_code=500)
 
 @app.get("/property/{unified_id}", response_class=HTMLResponse)
 @app.head("/property/{unified_id}", response_class=HTMLResponse)
 async def property_detail(request: Request, unified_id: str):
-    listings = load_listings_on_demand()
-    property_item = next((item for item in listings if item['unified_id'] == unified_id), None)
-    
-    if not property_item:
-        return HTMLResponse("<h3>Property not found</h3>", status_code=404)
+    try:
+        # unified_id से टेबल नाम और आईडी अलग करना (जैसे: LARGE_PROPERTY_LISTING_xyz)
+        parts = unified_id.split("_", 1)
+        if len(parts) != 2:
+            return HTMLResponse("<h3>Property not found</h3>", status_code=404)
+        
+        table_name, prop_id = parts[0], parts[1]
+        if table_name not in TABLE_NAMES:
+            return HTMLResponse("<h3>Property not found</h3>", status_code=404)
 
-    return templates.TemplateResponse(
-        "detail.html", 
-        {
-            "request": request,
-            "property": property_item
-        }
-    )
-    
+        dynamodb = get_dynamodb_resource()
+        table = dynamodb.Table(table_name)
+
+        property_item = None
+        # सीधे प्राइमरी की से एक सिंगल रिकॉर्ड फेच करना (बिना पूरी टेबल स्कैन किए)
+        for key_name in ['property_id', 'id']:
+            try:
+                res = table.get_item(Key={key_name: prop_id})
+                if 'Item' in res:
+                    property_item = standardize_item(table_name, res['Item'])
+                    break
+            except Exception:
+                continue
+
+        if not property_item:
+            return HTMLResponse("<h3>Property not found</h3>", status_code=404)
+
+        return templates.TemplateResponse(
+            "detail.html", 
+            {
+                "request": request,
+                "property": property_item
+            }
+        )
+    except Exception as e:
+        return HTMLResponse(f"<h3>Internal Server Error: {str(e)}</h3>", status_code=500)
+        
