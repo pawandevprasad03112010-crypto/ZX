@@ -92,7 +92,7 @@ def fetch_all_listings():
     return all_listings
 
 @app.get("/", response_class=HTMLResponse)
-async def home(request: Request, q: Query(default=None)):
+async def home(request: Request, q: str = ""):
     listings = fetch_all_listings()
     total_count = len(listings)
 
@@ -131,3 +131,4 @@ async def property_detail(request: Request, unified_id: str):
         "request": request,
         "property": property_item
     })
+                
