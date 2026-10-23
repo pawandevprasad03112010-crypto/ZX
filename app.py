@@ -3,12 +3,12 @@ import boto3
 from decimal import Decimal
 from fastapi import FastAPI, Request, Query
 from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
+from jinja2 import Environment, FileSystemLoader
 
 app = FastAPI(title="Only Broker Real Estate Portal")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
+env = Environment(loader=FileSystemLoader(os.path.join(BASE_DIR, "templates")))
 
 # AWS और DynamoDB क्रेडेंशियल्स
 AWS_ACCESS_KEY_ID = "AKIA32VVAONMQV5QKNED"
@@ -99,7 +99,7 @@ async def home(request: Request, q: str = ""):
         total_db_count = 0
         query_lower = q.strip().lower()
 
-        # यदि यूजर ने सर्च किया है, केवल तभी डेटाबेस स्कैन होगा
+        # जब यूजर सर्च करेगा, केवल तभी डेटाबेस स्कैन होगा
         if query_lower:
             dynamodb = get_dynamodb_resource()
             for table_name in TABLE_NAMES:
@@ -125,17 +125,18 @@ async def home(request: Request, q: str = ""):
                 except Exception as e:
                     print(f"Error scanning table {table_name}: {e}")
 
-        return templates.TemplateResponse(
-            "index.html", 
-            {
-                "request": request,
-                "listings": listings,
-                "total_count": total_db_count if query_lower else 0,
-                "filtered_count": len(listings),
-                "locations": sorted(list(all_locations)),
-                "query": q or ""
-            }
+        # सीधे Jinja2 Environment का उपयोग करके HTML रेंडर करना (बिना किसी Starlette Cache एरर के)
+        template = env.get_template("index.html")
+        html_content = template.render(
+            request=request,
+            listings=listings,
+            total_count=total_db_count if query_lower else 0,
+            filtered_count=len(listings),
+            locations=sorted(list(all_locations)),
+            query=q or ""
         )
+        return HTMLResponse(content=html_content)
+
     except Exception as e:
         return HTMLResponse(f"<h3>Internal Server Error: {str(e)}</h3>", status_code=500)
 
@@ -143,7 +144,6 @@ async def home(request: Request, q: str = ""):
 @app.head("/property/{unified_id}", response_class=HTMLResponse)
 async def property_detail(request: Request, unified_id: str):
     try:
-        # unified_id से टेबल नाम और आईडी अलग करना (जैसे: LARGE_PROPERTY_LISTING_xyz)
         parts = unified_id.split("_", 1)
         if len(parts) != 2:
             return HTMLResponse("<h3>Property not found</h3>", status_code=404)
@@ -156,7 +156,6 @@ async def property_detail(request: Request, unified_id: str):
         table = dynamodb.Table(table_name)
 
         property_item = None
-        # सीधे प्राइमरी की से एक सिंगल रिकॉर्ड फेच करना (बिना पूरी टेबल स्कैन किए)
         for key_name in ['property_id', 'id']:
             try:
                 res = table.get_item(Key={key_name: prop_id})
@@ -169,13 +168,13 @@ async def property_detail(request: Request, unified_id: str):
         if not property_item:
             return HTMLResponse("<h3>Property not found</h3>", status_code=404)
 
-        return templates.TemplateResponse(
-            "detail.html", 
-            {
-                "request": request,
-                "property": property_item
-            }
+        template = env.get_template("detail.html")
+        html_content = template.render(
+            request=request,
+            property=property_item
         )
+        return HTMLResponse(content=html_content)
+
     except Exception as e:
         return HTMLResponse(f"<h3>Internal Server Error: {str(e)}</h3>", status_code=500)
         
