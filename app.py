@@ -6,7 +6,6 @@ from fastapi.templating import Jinja2Templates
 
 app = FastAPI(title="Only Broker Real Estate Portal")
 
-# सही पाथ के साथ टेम्पलेट्स सेट करना
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
@@ -17,6 +16,9 @@ REGION = "ap-south-1"
 
 TABLE_NAMES = ["BUY_PROPERTY", "LARGE_PROPERTY_LISTING"]
 
+# ऑन-डिमांड डेटा स्टोर करने के लिए कैश वेरिएबल
+_cached_listings = None
+
 def get_dynamodb_resource():
     return boto3.resource(
         'dynamodb',
@@ -25,13 +27,13 @@ def get_dynamodb_resource():
         region_name=REGION
     )
 
-def search_listings_on_demand(query_str: str = ""):
-    dynamodb = get_dynamodb_resource()
-    matched_listings = []
-    all_locations = set()
-    total_db_count = 0
+def load_listings_on_demand():
+    global _cached_listings
+    if _cached_listings is not None:
+        return _cached_listings
 
-    query_lower = query_str.strip().lower()
+    dynamodb = get_dynamodb_resource()
+    all_listings = []
 
     for table_name in TABLE_NAMES:
         try:
@@ -44,7 +46,6 @@ def search_listings_on_demand(query_str: str = ""):
                 items.extend(response.get('Items', []))
 
             for item in items:
-                total_db_count += 1
                 try:
                     prop_id = str(item.get('property_id') or item.get('id') or item.get('_id') or 'unknown')
                     item['unified_id'] = f"{table_name}_{prop_id}"
@@ -63,9 +64,7 @@ def search_listings_on_demand(query_str: str = ""):
                     search_loc = f"{locality}, {city}".strip(', ')
                     if not search_loc:
                         search_loc = "Unknown Location"
-                    
                     item['search_location'] = search_loc
-                    all_locations.add(search_loc)
 
                     # इमेजेस स्टैंडर्डाइज़ेशन
                     images = []
@@ -77,10 +76,9 @@ def search_listings_on_demand(query_str: str = ""):
                     
                     if not images:
                         images = ["https://property-images-estatex-1.s3.ap-south-1.amazonaws.com/photo_1790848636898_001.png"]
-                    
                     item['unified_images'] = images
 
-                    # टाइटल और प्राइस स्टैंडर्डाइज़ेशन
+                    # टाइटल और प्राइस
                     listing_sec = item.get('listing', {})
                     entity_sec = item.get('entity', {})
                     pricing_sec = item.get('pricing', {})
@@ -98,30 +96,40 @@ def search_listings_on_demand(query_str: str = ""):
                     else:
                         item['unified_area'] = str(item.get('area') or 'Standard Area')
 
-                    if not query_lower or (query_lower in search_loc.lower() or query_lower in title.lower()):
-                        matched_listings.append(item)
-
+                    all_listings.append(item)
                 except Exception:
                     continue
-
         except Exception as e:
             print(f"Error scanning table {table_name}: {e}")
 
-    return matched_listings, sorted(list(all_locations)), total_db_count
+    _cached_listings = all_listings
+    return _cached_listings
 
 @app.get("/", response_class=HTMLResponse)
 @app.head("/", response_class=HTMLResponse)
 async def home(request: Request, q: str = ""):
-    listings, locations, total_count = search_listings_on_demand(q)
+    listings = load_listings_on_demand()
+    total_count = len(listings)
 
-    # सुरक्षित और सही TemplateResponse सिंटैक्स
+    locations = sorted(list(set(item['search_location'] for item in listings if item['search_location'])))
+
+    filtered_listings = listings
+    query_lower = q.strip().lower()
+
+    if query_lower:
+        filtered_listings = [
+            item for item in listings 
+            if query_lower in item['search_location'].lower() 
+            or query_lower in item['unified_title'].lower()
+        ]
+
     return templates.TemplateResponse(
         "index.html", 
         {
             "request": request,
-            "listings": listings,
+            "listings": filtered_listings,
             "total_count": total_count,
-            "filtered_count": len(listings),
+            "filtered_count": len(filtered_listings),
             "locations": locations,
             "query": q or ""
         }
@@ -130,7 +138,7 @@ async def home(request: Request, q: str = ""):
 @app.get("/property/{unified_id}", response_class=HTMLResponse)
 @app.head("/property/{unified_id}", response_class=HTMLResponse)
 async def property_detail(request: Request, unified_id: str):
-    listings, _, _ = search_listings_on_demand("")
+    listings = load_listings_on_demand()
     property_item = next((item for item in listings if item['unified_id'] == unified_id), None)
     
     if not property_item:
