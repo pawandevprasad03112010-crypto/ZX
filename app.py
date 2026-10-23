@@ -1,7 +1,7 @@
 import os
 import boto3
 from decimal import Decimal
-from fastapi import FastAPI, Request, Query
+from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from jinja2 import Environment, FileSystemLoader
 
@@ -16,6 +16,13 @@ AWS_SECRET_ACCESS_KEY = "8xmdCo/3fYlmv6Se3Zhwoe7TFBTMMCD05WkqrWLF"
 REGION = "ap-south-1"
 
 TABLE_NAMES = ["BUY_PROPERTY", "LARGE_PROPERTY_LISTING"]
+
+# ग्लोबल कैश
+_GLOBAL_CACHE = {
+    "listings": [],
+    "locations": [],
+    "loaded": False
+}
 
 def get_dynamodb_resource():
     return boto3.resource(
@@ -39,14 +46,11 @@ def decimal_to_native(obj):
 
 def standardize_item(table_name, raw_item):
     item = decimal_to_native(raw_item)
-    
-    # सही प्राइमरी की का पता लगाना
     prop_id = str(item.get('property_id') or item.get('id') or item.get('_id') or 'unknown')
     item['unified_id'] = f"{table_name}_{prop_id}"
     item['source_table'] = table_name
-    item['raw_property_id'] = prop_id # डिटेल पेज के लिए काम आएगा
 
-    # लोकेशन स्टैंडर्डाइज़ेशन
+    # लोकेशन
     loc = item.get('location', {})
     city, locality = "", ""
     if isinstance(loc, dict):
@@ -91,11 +95,15 @@ def standardize_item(table_name, raw_item):
 
     return item
 
-@app.get("/api/locations")
-async def get_locations():
-    """सभी लोकेशंस को पूरी तरह फेच करके ऑटो-कंपलीट के लिए देना।"""
+def load_data_lazily():
+    """सेफ तरीके से डेटा लोड करता है ताकि टाइमआउट न हो।"""
+    if _GLOBAL_CACHE["loaded"]:
+        return
+
     dynamodb = get_dynamodb_resource()
+    all_items = []
     all_locations = set()
+
     for table_name in TABLE_NAMES:
         try:
             table = dynamodb.Table(table_name)
@@ -105,54 +113,48 @@ async def get_locations():
                 response = table.scan(ExclusiveStartKey=response['LastEvaluatedKey'])
                 items.extend(response.get('Items', []))
 
-            for item in items:
-                loc = item.get('location', {})
-                if isinstance(loc, dict):
-                    city = str(loc.get('city', ''))
-                    locality = str(loc.get('locality', '') or loc.get('locality_name', '') or loc.get('society_name', ''))
-                    search_loc = f"{locality}, {city}".strip(', ')
-                    if search_loc:
-                        all_locations.add(search_loc)
-        except Exception:
-            pass
-    return JSONResponse(content=sorted(list(all_locations)))
+            for raw_item in items:
+                try:
+                    item = standardize_item(table_name, raw_item)
+                    all_items.append(item)
+                    if item['search_location'] != "Unknown Location":
+                        all_locations.add(item['search_location'])
+                except Exception:
+                    continue
+        except Exception as e:
+            print(f"Error loading table {table_name}: {e}")
+
+    _GLOBAL_CACHE["listings"] = all_items
+    _GLOBAL_CACHE["locations"] = sorted(list(all_locations))
+    _GLOBAL_CACHE["loaded"] = True
+
+@app.get("/api/locations")
+async def get_locations():
+    load_data_lazily()
+    return JSONResponse(content=_GLOBAL_CACHE["locations"])
 
 @app.get("/", response_class=HTMLResponse)
 @app.head("/", response_class=HTMLResponse)
 async def home(request: Request, q: str = ""):
     try:
+        # जैसे ही यूजर आएगा, डेटा सुरक्षित रूप से लोड हो जाएगा
+        load_data_lazily()
+        
         listings = []
-        total_db_count = 0
         query_lower = q.strip().lower()
+        all_listings = _GLOBAL_CACHE["listings"]
 
         if query_lower:
-            dynamodb = get_dynamodb_resource()
-            for table_name in TABLE_NAMES:
-                try:
-                    table = dynamodb.Table(table_name)
-                    # पूर्ण पेजिनेशन लूप ताकि सारे 200+ रिकॉर्ड्स आ सकें
-                    response = table.scan()
-                    items = response.get('Items', [])
-                    while 'LastEvaluatedKey' in response:
-                        response = table.scan(ExclusiveStartKey=response['LastEvaluatedKey'])
-                        items.extend(response.get('Items', []))
-
-                    for raw_item in items:
-                        total_db_count += 1
-                        try:
-                            item = standardize_item(table_name, raw_item)
-                            if query_lower in item['search_location'].lower() or query_lower in item['unified_title'].lower():
-                                listings.append(item)
-                        except Exception:
-                            continue
-                except Exception as e:
-                    print(f"Error scanning table {table_name}: {e}")
+            listings = [
+                item for item in all_listings
+                if query_lower in item['search_location'].lower() or query_lower in item['unified_title'].lower()
+            ]
 
         template = env.get_template("index.html")
         html_content = template.render(
             request=request,
             listings=listings,
-            total_count=total_db_count if query_lower else 0,
+            total_count=len(all_listings),
             filtered_count=len(listings),
             query=q or ""
         )
@@ -165,42 +167,8 @@ async def home(request: Request, q: str = ""):
 @app.head("/property/{unified_id}", response_class=HTMLResponse)
 async def property_detail(request: Request, unified_id: str):
     try:
-        parts = unified_id.split("_", 1)
-        if len(parts) != 2:
-            return HTMLResponse("<h3>Property not found</h3>", status_code=404)
-        
-        table_name, prop_id = parts[0], parts[1]
-        if table_name not in TABLE_NAMES:
-            return HTMLResponse("<h3>Property not found</h3>", status_code=404)
-
-        dynamodb = get_dynamodb_resource()
-        table = dynamodb.Table(table_name)
-
-        property_item = None
-        # सभी संभावित प्राइमरी की नामों से रिकॉर्ड ढूंढना
-        for key_name in ['property_id', 'id', '_id']:
-            try:
-                res = table.get_item(Key={key_name: prop_id})
-                if 'Item' in res:
-                    property_item = standardize_item(table_name, res['Item'])
-                    break
-            except Exception:
-                continue
-        
-        # यदि get_item से न मिले तो सुरक्षित रूप से स्कैन द्वारा खोजना
-        if not property_item:
-            response = table.scan()
-            items = response.get('Items', [])
-            while 'LastEvaluatedKey' in response:
-                response = table.scan(ExclusiveStartKey=response['LastEvaluatedKey'])
-                items.extend(response.get('Items', []))
-            
-            for raw_item in items:
-                temp_item = decimal_to_native(raw_item)
-                curr_id = str(temp_item.get('property_id') or temp_item.get('id') or temp_item.get('_id') or '')
-                if curr_id == prop_id:
-                    property_item = standardize_item(table_name, raw_item)
-                    break
+        load_data_lazily()
+        property_item = next((item for item in _GLOBAL_CACHE["listings"] if item['unified_id'] == unified_id), None)
 
         if not property_item:
             return HTMLResponse("<h3>Property not found</h3>", status_code=404)
@@ -214,4 +182,4 @@ async def property_detail(request: Request, unified_id: str):
 
     except Exception as e:
         return HTMLResponse(f"<h3>Internal Server Error: {str(e)}</h3>", status_code=500)
-    
+        
