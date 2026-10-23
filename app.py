@@ -39,11 +39,14 @@ def decimal_to_native(obj):
 
 def standardize_item(table_name, raw_item):
     item = decimal_to_native(raw_item)
+    
+    # सही प्राइमरी की का पता लगाना
     prop_id = str(item.get('property_id') or item.get('id') or item.get('_id') or 'unknown')
     item['unified_id'] = f"{table_name}_{prop_id}"
     item['source_table'] = table_name
+    item['raw_property_id'] = prop_id # डिटेल पेज के लिए काम आएगा
 
-    # लोकेशन फील्ड को अलग-अलग स्ट्रक्चर्स से सुरक्षित निकालना
+    # लोकेशन स्टैंडर्डाइज़ेशन
     loc = item.get('location', {})
     city, locality = "", ""
     if isinstance(loc, dict):
@@ -90,14 +93,18 @@ def standardize_item(table_name, raw_item):
 
 @app.get("/api/locations")
 async def get_locations():
-    """स्वचालित रूप से सभी लोकेशंस की लिस्ट फेच करके देगा ताकि ऑटो-कंपलीट काम कर सके।"""
+    """सभी लोकेशंस को पूरी तरह फेच करके ऑटो-कंपलीट के लिए देना।"""
     dynamodb = get_dynamodb_resource()
     all_locations = set()
     for table_name in TABLE_NAMES:
         try:
             table = dynamodb.Table(table_name)
-            response = table.scan(ProjectionExpression="#loc", ExpressionAttributeNames={"#loc": "location"})
+            response = table.scan()
             items = response.get('Items', [])
+            while 'LastEvaluatedKey' in response:
+                response = table.scan(ExclusiveStartKey=response['LastEvaluatedKey'])
+                items.extend(response.get('Items', []))
+
             for item in items:
                 loc = item.get('location', {})
                 if isinstance(loc, dict):
@@ -123,9 +130,9 @@ async def home(request: Request, q: str = ""):
             for table_name in TABLE_NAMES:
                 try:
                     table = dynamodb.Table(table_name)
+                    # पूर्ण पेजिनेशन लूप ताकि सारे 200+ रिकॉर्ड्स आ सकें
                     response = table.scan()
                     items = response.get('Items', [])
-                    
                     while 'LastEvaluatedKey' in response:
                         response = table.scan(ExclusiveStartKey=response['LastEvaluatedKey'])
                         items.extend(response.get('Items', []))
@@ -134,7 +141,6 @@ async def home(request: Request, q: str = ""):
                         total_db_count += 1
                         try:
                             item = standardize_item(table_name, raw_item)
-                            # सटीक मैचिंग लॉजिक
                             if query_lower in item['search_location'].lower() or query_lower in item['unified_title'].lower():
                                 listings.append(item)
                         except Exception:
@@ -171,7 +177,8 @@ async def property_detail(request: Request, unified_id: str):
         table = dynamodb.Table(table_name)
 
         property_item = None
-        for key_name in ['property_id', 'id']:
+        # सभी संभावित प्राइमरी की नामों से रिकॉर्ड ढूंढना
+        for key_name in ['property_id', 'id', '_id']:
             try:
                 res = table.get_item(Key={key_name: prop_id})
                 if 'Item' in res:
@@ -179,6 +186,21 @@ async def property_detail(request: Request, unified_id: str):
                     break
             except Exception:
                 continue
+        
+        # यदि get_item से न मिले तो सुरक्षित रूप से स्कैन द्वारा खोजना
+        if not property_item:
+            response = table.scan()
+            items = response.get('Items', [])
+            while 'LastEvaluatedKey' in response:
+                response = table.scan(ExclusiveStartKey=response['LastEvaluatedKey'])
+                items.extend(response.get('Items', []))
+            
+            for raw_item in items:
+                temp_item = decimal_to_native(raw_item)
+                curr_id = str(temp_item.get('property_id') or temp_item.get('id') or temp_item.get('_id') or '')
+                if curr_id == prop_id:
+                    property_item = standardize_item(table_name, raw_item)
+                    break
 
         if not property_item:
             return HTMLResponse("<h3>Property not found</h3>", status_code=404)
@@ -191,4 +213,5 @@ async def property_detail(request: Request, unified_id: str):
         return HTMLResponse(content=html_content)
 
     except Exception as e:
-        return HTMLResponse(f"<h3>Internal Server Error: {str(e)}</h3>", status_code.s) # Wait, status_code=500
+        return HTMLResponse(f"<h3>Internal Server Error: {str(e)}</h3>", status_code=500)
+    
