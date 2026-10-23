@@ -1,6 +1,6 @@
 import os
 import boto3
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Query
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
@@ -22,14 +22,19 @@ def get_dynamodb_resource():
         region_name=REGION
     )
 
-def fetch_all_listings():
-    """Scans both tables and standardizes fields safely."""
+def search_listings_on_demand(query_str: str = ""):
+    """ जब यूजर सर्च करेगा, केवल तभी डेटाबेस को स्कैन और फिल्टर किया जाएगा। """
     dynamodb = get_dynamodb_resource()
-    all_listings = []
+    matched_listings = []
+    all_locations = set()
+    total_db_count = 0
+
+    query_lower = query_str.strip().lower()
 
     for table_name in TABLE_NAMES:
         try:
             table = dynamodb.Table(table_name)
+            # यदि यूजर ने कुछ सर्च किया है, तो हम टारगेटेड स्कैन या फिल्टर लगा सकते हैं
             response = table.scan()
             items = response.get('Items', [])
             
@@ -38,11 +43,13 @@ def fetch_all_listings():
                 items.extend(response.get('Items', []))
 
             for item in items:
+                total_db_count += 1
                 try:
                     prop_id = str(item.get('property_id') or item.get('id') or item.get('_id') or 'unknown')
                     item['unified_id'] = f"{table_name}_{prop_id}"
                     item['source_table'] = table_name
 
+                    # Location standardization
                     loc = item.get('location', {})
                     city, locality = "", ""
                     if isinstance(loc, dict):
@@ -52,10 +59,14 @@ def fetch_all_listings():
                         city = str(item.get('city', ''))
                         locality = str(item.get('locality', ''))
                     
-                    item['search_location'] = f"{locality}, {city}".strip(', ')
-                    if not item['search_location']:
-                        item['search_location'] = "Unknown Location"
+                    search_loc = f"{locality}, {city}".strip(', ')
+                    if not search_loc:
+                        search_loc = "Unknown Location"
+                    
+                    item['search_location'] = search_loc
+                    all_locations.add(search_loc)
 
+                    # Images standardization
                     images = []
                     media = item.get('media', {})
                     if isinstance(media, dict):
@@ -68,11 +79,13 @@ def fetch_all_listings():
                     
                     item['unified_images'] = images
 
+                    # Title & Price standardization
                     listing_sec = item.get('listing', {})
                     entity_sec = item.get('entity', {})
                     pricing_sec = item.get('pricing', {})
 
-                    item['unified_title'] = str(listing_sec.get('title') or entity_sec.get('title') or item.get('title') or 'Residential Property')
+                    title = str(listing_sec.get('title') or entity_sec.get('title') or item.get('title') or 'Residential Property')
+                    item['unified_title'] = title
                     item['unified_price'] = str(pricing_sec.get('display_price') or pricing_sec.get('price_in_words') or item.get('price') or 'Contact for Price')
                     
                     prop_sec = item.get('property', {})
@@ -84,42 +97,32 @@ def fetch_all_listings():
                     else:
                         item['unified_area'] = str(item.get('area') or 'Standard Area')
 
-                    all_listings.append(item)
-                except Exception as inner_ex:
+                    # इलास्टिक सर्च मैचिंग लॉजिक (सर्च के समय फिल्टर)
+                    if not query_lower or (query_lower in search_loc.lower() or query_lower in title.lower()):
+                        matched_listings.append(item)
+
+                except Exception:
                     continue
 
         except Exception as e:
             print(f"Error scanning table {table_name}: {e}")
 
-    return all_listings
+    return matched_listings, sorted(list(all_locations)), total_db_count
 
 @app.get("/", response_class=HTMLResponse)
+@app.head("/", response_class=HTMLResponse)
 async def home(request: Request, q: str = ""):
-    listings = fetch_all_listings()
-    total_count = len(listings)
+    # जब यूजर सर्च करेगा (या पेज खोलेगा), तभी यह ऑन-डिमांड फेच और सर्च करेगा
+    listings, locations, total_count = search_listings_on_demand(q)
 
-    locations = sorted(list(set(item['search_location'] for item in listings if item['search_location'])))
-
-    filtered_listings = listings
-    selected_query = ""
-
-    if q:
-        selected_query = q.strip().lower()
-        filtered_listings = [
-            item for item in listings 
-            if selected_query in item['search_location'].lower() 
-            or selected_query in item['unified_title'].lower()
-        ]
-
-    # आधुनिक Starlette TemplateResponse फॉर्मेट
     return templates.TemplateResponse(
         request, 
         "index.html", 
         {
             "request": request,
-            "listings": filtered_listings,
+            "listings": listings,
             "total_count": total_count,
-            "filtered_count": len(filtered_listings),
+            "filtered_count": len(listings),
             "locations": locations,
             "query": q or ""
         }
@@ -127,7 +130,8 @@ async def home(request: Request, q: str = ""):
 
 @app.get("/property/{unified_id}", response_class=HTMLResponse)
 async def property_detail(request: Request, unified_id: str):
-    listings = fetch_all_listings()
+    # डिटेल पेज के लिए भी ऑन-डिमांड सिंगल सर्च या फुल लिस्ट फेच
+    listings, _, _ = search_listings_on_demand("")
     property_item = next((item for item in listings if item['unified_id'] == unified_id), None)
     
     if not property_item:
