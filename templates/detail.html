@@ -70,7 +70,13 @@
                 <div class="bg-white rounded-2xl shadow-md p-6">
                     <h3 class="text-lg font-bold text-gray-900 mb-3">Property Description</h3>
                     <p class="text-gray-600 text-sm leading-relaxed">
-                        {{ property.entity.description | default(property.listing.description) | default('No detailed description available for this property.') }}
+                        {% if property.entity and property.entity.description %}
+                            {{ property.entity.description }}
+                        {% elif property.listing and property.listing.description %}
+                            {{ property.listing.description }}
+                        {% else %}
+                            No detailed description available for this property.
+                        {% endif %}
                     </p>
                 </div>
 
@@ -95,17 +101,28 @@
                     <h3 class="text-lg font-bold text-gray-900 mb-4">Contact Dealer / Agent</h3>
                     
                     <div class="flex items-center gap-4 mb-6 pb-4 border-b border-gray-100">
-                        <img src="{{ property.contact_details.dealer_photo_url | default('https://property-images-estatex-1.s3.ap-south-1.amazonaws.com/photo_1792049032122_001.png') }}" 
-                             alt="Dealer" class="w-14 h-14 rounded-full object-cover border-2 border-blue-500"
-                             onerror="this.src='https://property-images-estatex-1.s3.ap-south-1.amazonaws.com/photo_1792049032122_001.png'">
+                        <img src="https://property-images-estatex-1.s3.ap-south-1.amazonaws.com/photo_1792049032122_001.png" 
+                             alt="Dealer" class="w-14 h-14 rounded-full object-cover border-2 border-blue-500">
                         <div>
-                            <h4 class="font-bold text-gray-900">{{ property.contact_details.contact_name | default('Verified Dealer') }}</h4>
-                            <p class="text-xs text-gray-500 font-medium">{{ property.contact_details.company_name | default('Real Estate Partner') }}</p>
+                            <h4 class="font-bold text-gray-900">
+                                {% if property.contact_details and property.contact_details.contact_name %}
+                                    {{ property.contact_details.contact_name }}
+                                {% else %}
+                                    Verified Dealer
+                                {% endif %}
+                            </h4>
+                            <p class="text-xs text-gray-500 font-medium">
+                                {% if property.contact_details and property.contact_details.company_name %}
+                                    {{ property.contact_details.company_name }}
+                                {% else %}
+                                    Real Estate Partner
+                                {% endif %}
+                            </p>
                         </div>
                     </div>
 
                     <div class="space-y-3">
-                        <a href="tel:{{ property.contact_details.phone_number | default('9892274727') }}" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-xl transition flex items-center justify-center gap-2 shadow">
+                        <a href="tel:9892274727" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-xl transition flex items-center justify-center gap-2 shadow">
                             <i class="fa-solid fa-phone"></i> Call Agent Now
                         </a>
                         <a href="https://wa.me/919892274727" target="_blank" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-xl transition flex items-center justify-center gap-2 shadow">
