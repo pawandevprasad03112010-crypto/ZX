@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Only Broker - Real Estate Search Portal</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body class="bg-gray-50 font-sans min-h-screen text-gray-800">
+
+    <!-- Header / Navbar -->
+    <header class="bg-white shadow-sm sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
+            <a href="/" class="text-2xl font-black text-blue-600 tracking-wide flex items-center gap-2">
+                <i class="fa-solid fa-building"></i> Only Broker
+            </a>
+            <div class="flex items-center gap-3 bg-blue-50 border border-blue-200 px-4 py-2 rounded-full shadow-inner">
+                <span class="text-sm font-semibold text-blue-700">Total Database Listings:</span>
+                <span id="total-badge" class="bg-blue-600 text-white font-bold px-2.5 py-0.5 rounded-full text-sm">{{ total_count }}</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- Hero Search Section -->
+    <section class="bg-gradient-to-r from-blue-900 to-indigo-800 text-white py-14 px-4 shadow-lg">
+        <div class="max-w-3xl mx-auto text-center">
+            <h1 class="text-4xl font-extrabold mb-3 tracking-tight">Find Your Dream Property</h1>
+            <p class="text-blue-200 mb-8 text-lg">Search by location, society, or landmark across verified listings</p>
+            
+            <form action="/" method="GET" class="relative max-w-2xl mx-auto" id="search-form">
+                <div class="flex items-center bg-white rounded-full shadow-2xl p-2 border-2 border-transparent focus-within:border-blue-400 transition">
+                    <span class="pl-4 text-gray-400"><i class="fa-solid fa-location-dot text-lg"></i></span>
+                    <input type="text" name="q" id="search-input" value="{{ query }}" placeholder="Search locality, city, or building name..." autocomplete="off"
+                           class="w-full px-4 py-3 text-gray-800 bg-transparent focus:outline-none text-base font-medium">
+                    <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-8 py-3 rounded-full transition shadow-md flex items-center gap-2">
+                        <i class="fa-solid fa-magnifying-glass"></i> Search
+                    </button>
+                </div>
+
+                <!-- Autocomplete Dropdown -->
+                <div id="suggestions-box" class="absolute left-0 right-0 mt-2 bg-white text-gray-800 rounded-2xl shadow-2xl border border-gray-100 hidden z-50 text-left overflow-hidden">
+                    <div class="p-2 text-xs font-bold text-gray-400 uppercase tracking-wider bg-gray-50 border-b">Matching Locations</div>
+                    <div id="suggestions-list" class="max-h-60 overflow-y-auto divide-y divide-gray-100"></div>
+                </div>
+            </form>
+
+            <!-- Recent Searches Pill Container -->
+            <div id="recent-searches-container" class="mt-4 flex flex-wrap justify-center gap-2 items-center hidden">
+                <span class="text-xs text-blue-200 font-semibold uppercase tracking-wider mr-1"><i class="fa-solid fa-clock-rotate-left"></i> Recent:</span>
+                <div id="recent-pills" class="flex flex-wrap gap-2"></div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Main Results Section -->
+    <main class="max-w-7xl mx-auto px-4 py-8">
+        <div class="flex justify-between items-center mb-6 border-b pb-4">
+            <div>
+                <h2 class="text-2xl font-bold text-gray-900">
+                    {% if query %} Search Results for "<span class="text-blue-600">{{ query }}</span>" {% else %} All Verified Properties {% endif %}
+                </h2>
+            </div>
+            <div class="bg-indigo-50 border border-indigo-100 text-indigo-700 px-4 py-2 rounded-lg font-bold text-sm shadow-sm">
+                Showing Results: <span id="filtered-count" class="text-indigo-900">{{ filtered_count }}</span>
+            </div>
+        </div>
+
+        {% if listings|length == 0 %}
+        <div class="bg-white rounded-2xl shadow p-12 text-center max-w-lg mx-auto my-12">
+            <i class="fa-solid fa-house-chimney-crack text-5xl text-gray-300 mb-4"></i>
+            <h3 class="text-xl font-bold text-gray-700 mb-2">No Properties Found</h3>
+            <p class="text-gray-500 text-sm mb-6">We couldn't find any listings matching your search criteria. Try searching for a different location.</p>
+            <a href="/" class="bg-blue-600 text-white font-semibold px-6 py-2.5 rounded-xl shadow hover:bg-blue-700 transition">Reset Search</a>
+        </div>
+        {% else %}
+        <!-- Listing Grid -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+            {% for item in listings %}
+            <div class="bg-white rounded-2xl shadow-md hover:shadow-xl transition duration-300 overflow-hidden flex flex-col border border-gray-100 relative group">
+                
+                <!-- Image Carousel Container -->
+                <div class="relative h-56 bg-gray-200 overflow-hidden">
+                    <div class="carousel-track flex h-full transition-transform duration-300 ease-out" data-index="0">
+                        {% for img in item.unified_images %}
+                        <img src="{{ img }}" alt="Property Image" class="w-full h-full object-cover flex-shrink-0" onerror="this.src='https://property-images-estatex-1.s3.ap-south-1.amazonaws.com/photo_1790848636898_001.png'">
+                        {% endfor %}
+                    </div>
+
+                    <!-- Carousel Navigation Arrows -->
+                    {% if item.unified_images|length > 1 %}
+                    <button onclick="event.stopPropagation(); slideCarousel(this, -1)" class="absolute left-2 top-1/2 -translate-y-1/2 bg-black/50 hover:bg-black/75 text-white w-8 h-8 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition shadow">
+                        <i class="fa-solid fa-chevron-left text-xs"></i>
+                    </button>
+                    <button onclick="event.stopPropagation(); slideCarousel(this, 1)" class="absolute right-2 top-1/2 -translate-y-1/2 bg-black/50 hover:bg-black/75 text-white w-8 h-8 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition shadow">
+                        <i class="fa-solid fa-chevron-right text-xs"></i>
+                    </button>
+                    <div class="absolute bottom-2 right-2 bg-black/60 text-white text-[10px] px-2 py-0.5 rounded-full font-medium">
+                        <span class="current-slide">1</span>/{{ item.unified_images|length }}
+                    </div>
+                    {% endif %}
+
+                    <span class="absolute top-3 left-3 bg-blue-600 text-white text-xs font-bold px-3 py-1 rounded-full shadow">
+                        {{ item.unified_bhk }} BHK
+                    </span>
+                </div>
+
+                <!-- Card Content (Clickable to Details) -->
+                <a href="/property/{{ item.unified_id }}" class="p-5 flex-1 flex flex-col justify-between">
+                    <div>
+                        <div class="text-2xl font-extrabold text-blue-600 mb-1">{{ item.unified_price }}</div>
+                        <h3 class="font-bold text-gray-900 text-base line-clamp-1 mb-2 group-hover:text-blue-600 transition">{{ item.unified_title }}</h3>
+                        <p class="text-gray-500 text-sm flex items-center gap-1.5 mb-4">
+                            <i class="fa-solid fa-location-dot text-red-500"></i> <span class="line-clamp-1">{{ item.search_location }}</span>
+                        </p>
+                    </div>
+
+                    <div class="pt-4 border-t border-gray-100 flex justify-between items-center text-xs font-medium text-gray-600">
+                        <span><i class="fa-solid fa-vector-square text-blue-500 mr-1"></i> {{ item.unified_area }}</span>
+                        <span class="text-blue-600 font-bold group-hover:underline">View Details <i class="fa-solid fa-arrow-right ml-1"></i></span>
+                    </div>
+                </a>
+
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </main>
+
+    <!-- JavaScript for Carousel, Autocomplete, and Recent Searches -->
+    <script>
+        const allLocations = {{ locations | tojson }};
+        const searchInput = document.getElementById('search-input');
+        const suggestionsBox = document.getElementById('suggestions-box');
+        const suggestionsList = document.getElementById('suggestions-list');
+        const searchForm = document.getElementById('search-form');
+
+        // Autocomplete Logic
+        searchInput.addEventListener('input', function() {
+            const val = this.value.toLowerCase().trim();
+            suggestionsList.innerHTML = '';
+            if(!val) {
+                suggestionsBox.classList.add('hidden');
+                return;
+            }
+
+            const matches = allLocations.filter(loc => loc.toLowerCase().includes(val)).slice(0, 8);
+            if(matches.length > 0) {
+                suggestionsBox.classList.remove('hidden');
+                matches.forEach(match => {
+                    const div = document.createElement('div');
+                    div.className = 'px-4 py-2.5 hover:bg-blue-50 cursor-pointer text-sm font-medium text-gray-700 transition flex items-center gap-2';
+                    div.innerHTML = `<i class="fa-solid fa-location-crosshairs text-blue-500 text-xs"></i> ${match}`;
+                    div.onclick = () => {
+                        searchInput.value = match;
+                        suggestionsBox.classList.add('hidden');
+                        saveRecentSearch(match);
+                        searchForm.submit();
+                    };
+                    suggestionsList.appendChild(div);
+                });
+            } else {
+                suggestionsBox.classList.add('hidden');
+            }
+        });
+
+        document.addEventListener('click', (e) => {
+            if(!searchForm.contains(e.target)) {
+                suggestionsBox.classList.add('hidden');
+            }
+        });
+
+        // Recent Searches Handling via LocalStorage
+        function saveRecentSearch(query) {
+            if(!query) return;
+            let recent = JSON.parse(localStorage.getItem('recent_searches') || '[]');
+            recent = recent.filter(item => item.toLowerCase() !== query.toLowerCase());
+            recent.unshift(query);
+            if(recent.length > 5) recent.pop();
+            localStorage.setItem('recent_searches', JSON.stringify(recent));
+        }
+
+        function loadRecentSearches() {
+            const recent = JSON.parse(localStorage.getItem('recent_searches') || '[]');
+            const container = document.getElementById('recent-searches-container');
+            const pillsDiv = document.getElementById('recent-pills');
+            pillsDiv.innerHTML = '';
+
+            if(recent.length > 0) {
+                container.classList.remove('hidden');
+                recent.forEach(term => {
+                    const pill = document.createElement('button');
+                    pill.type = 'button';
+                    pill.className = 'bg-white/10 hover:bg-white/20 text-blue-100 text-xs px-3 py-1 rounded-full transition border border-white/20 font-medium';
+                    pill.textContent = term;
+                    pill.onclick = () => {
+                        searchInput.value = term;
+                        searchForm.submit();
+                    };
+                    pillsDiv.appendChild(pill);
+                });
+            }
+        }
+
+        searchForm.addEventListener('submit', () => {
+            saveRecentSearch(searchInput.value.trim());
+        });
+
+        window.addEventListener('DOMContentLoaded', loadRecentSearches);
+
+        // Image Carousel Slider Logic
+        function slideCarousel(btn, direction) {
+            const card = btn.closest('.relative');
+            const track = card.querySelector('.carousel-track');
+            const slidesCount = track.children.length;
+            let currentIndex = parseInt(track.getAttribute('data-index'));
+
+            currentIndex += direction;
+            if(currentIndex < 0) currentIndex = slidesCount - 1;
+            if(currentIndex >= slidesCount) currentIndex = 0;
+
+            track.setAttribute('data-index', currentIndex);
+            track.style.transform = `translateX(-${currentIndex * 100}%)`;
+
+            const counter = card.querySelector('.current-slide');
+            if(counter) counter.textContent = currentIndex + 1;
+        }
+    </script>
+</body>
+</html>
