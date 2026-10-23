@@ -1,6 +1,6 @@
 import os
 import boto3
-from fastapi import FastAPI, Request, Query
+from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
@@ -23,7 +23,7 @@ def get_dynamodb_resource():
     )
 
 def fetch_all_listings():
-    """Scans both tables and standardizes fields safely to prevent runtime crashes."""
+    """Scans both tables and standardizes fields safely."""
     dynamodb = get_dynamodb_resource()
     all_listings = []
 
@@ -39,12 +39,10 @@ def fetch_all_listings():
 
             for item in items:
                 try:
-                    # Standardize unique identifier
                     prop_id = str(item.get('property_id') or item.get('id') or item.get('_id') or 'unknown')
                     item['unified_id'] = f"{table_name}_{prop_id}"
                     item['source_table'] = table_name
 
-                    # Standardize Location fields
                     loc = item.get('location', {})
                     city, locality = "", ""
                     if isinstance(loc, dict):
@@ -58,7 +56,6 @@ def fetch_all_listings():
                     if not item['search_location']:
                         item['search_location'] = "Unknown Location"
 
-                    # Standardize Images extraction
                     images = []
                     media = item.get('media', {})
                     if isinstance(media, dict):
@@ -71,7 +68,6 @@ def fetch_all_listings():
                     
                     item['unified_images'] = images
 
-                    # Standardize Title & Price
                     listing_sec = item.get('listing', {})
                     entity_sec = item.get('entity', {})
                     pricing_sec = item.get('pricing', {})
@@ -79,7 +75,6 @@ def fetch_all_listings():
                     item['unified_title'] = str(listing_sec.get('title') or entity_sec.get('title') or item.get('title') or 'Residential Property')
                     item['unified_price'] = str(pricing_sec.get('display_price') or pricing_sec.get('price_in_words') or item.get('price') or 'Contact for Price')
                     
-                    # Standardize Property specs
                     prop_sec = item.get('property', {})
                     item['unified_bhk'] = str(prop_sec.get('bedrooms') or item.get('bedrooms') or '2')
                     
@@ -91,7 +86,6 @@ def fetch_all_listings():
 
                     all_listings.append(item)
                 except Exception as inner_ex:
-                    print(f"Skipping malformed item: {inner_ex}")
                     continue
 
         except Exception as e:
@@ -117,14 +111,19 @@ async def home(request: Request, q: str = ""):
             or selected_query in item['unified_title'].lower()
         ]
 
-    return templates.TemplateResponse("index.html", {
-        "request": request,
-        "listings": filtered_listings,
-        "total_count": total_count,
-        "filtered_count": len(filtered_listings),
-        "locations": locations,
-        "query": q or ""
-    })
+    # आधुनिक Starlette TemplateResponse फॉर्मेट
+    return templates.TemplateResponse(
+        request, 
+        "index.html", 
+        {
+            "request": request,
+            "listings": filtered_listings,
+            "total_count": total_count,
+            "filtered_count": len(filtered_listings),
+            "locations": locations,
+            "query": q or ""
+        }
+    )
 
 @app.get("/property/{unified_id}", response_class=HTMLResponse)
 async def property_detail(request: Request, unified_id: str):
@@ -134,8 +133,12 @@ async def property_detail(request: Request, unified_id: str):
     if not property_item:
         return HTMLResponse("<h3>Property not found</h3>", status_code=404)
 
-    return templates.TemplateResponse("detail.html", {
-        "request": request,
-        "property": property_item
-    })
+    return templates.TemplateResponse(
+        request, 
+        "detail.html", 
+        {
+            "request": request,
+            "property": property_item
+        }
+    )
     
