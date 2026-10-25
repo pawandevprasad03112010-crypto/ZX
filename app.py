@@ -72,7 +72,7 @@ def standardize_item(table_name, raw_item):
             images = [str(img) for img in img_list if img and str(img).startswith('http')]
     
     if not images:
-        images = ["https://property-images-estatex-1.s3.ap-south-1.amazonaws.com/photo_1790848636898_001.png"]
+        images = [""]
     item['unified_images'] = images
 
     # टाइटल और प्राइस
